@@ -61,3 +61,23 @@ export interface CategoryScore {
 export interface DecisionProfile {
   totalScores: CategoryScore[];
 }
+// Comparison between self profile and proxy profile for one category
+export interface ProxyFitCategoryComparison {
+  category: CategoryId;
+  selfScore: number;
+  proxyScore: number;
+  /**
+   * proxyScore - selfScore (pozitív = proxy többet "tol" az adott irányba)
+   */
+  difference: number;
+}
+
+// Aggregated ProxyFit result for all categories
+export interface ProxyFitResult {
+  categories: ProxyFitCategoryComparison[];
+  /**
+   * Átlagos abszolút eltérés a kategóriák között
+   * (0 = teljes egyezés, minél nagyobb, annál nagyobb a mismatch)
+   */
+  overallDifference: number;
+}
