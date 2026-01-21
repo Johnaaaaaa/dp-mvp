@@ -1,83 +1,117 @@
 // types/dp.ts
+// DP core types – domain-agnostikus modell
 
-// Supported languages for UI text
+// Nyelvi kódok
 export type Lang = 'de' | 'en';
 
-// A piece of text in two languages (de/en)
-export interface LocalizedText {
+// Domain-ek – most health az aktív, a többi későbbi modulhoz
+export type Domain = 'health' | 'match' | 'sandbox';
+
+// Lokalizált szöveg: DE + EN mindig együtt
+export type LocalizedText = {
   de: string;
   en: string;
-}
+};
 
-// Category identifiers (MVP: fixed 3)
-export type CategoryId = 'autonomy' | 'family' | 'risk_tolerance';
+// Kategória azonosító – health-ben pl. autonómia, Belastung, Risiko, stb.
+// MVP-ben string, később lehet string union (literal típusok).
+export type CategoryId = string;
 
-// Traffic light colors for risk/result display
-export type RiskColor = 'red' | 'yellow' | 'green';
-
-// Human-friendly metadata for a category (used for UI labels & descriptions)
-export interface CategoryDefinition {
+// Kategória definíció UI-nak (label + magyarázat)
+export type CategoryDefinition = {
   id: CategoryId;
   label: LocalizedText;
   description: LocalizedText;
-}
+};
 
-// One answer option within a question
-export interface AnswerOption {
-  id: string;
-  label: LocalizedText;               // de/en label for the option
-  scores: Record<CategoryId, number>; // contribution to each category
-}
+// Story / Question / AnswerOption / Answer – domain-agnosztikus kérdésmodell
 
-// One question within a story
-export interface Question {
-  id: string;
-  text: LocalizedText;                // de/en question text
-  options: AnswerOption[];
-}
+export type StoryId = string;
+export type QuestionId = string;
+export type AnswerOptionId = string;
 
-// A story (scenario) with multiple questions
-export interface Story {
-  id: string;
-  title: LocalizedText;               // de/en title
-  description?: LocalizedText;        // de/en description
+export type Story = {
+  id: StoryId;
+  domain: Domain;
+  title: LocalizedText;
+  description: LocalizedText;
   questions: Question[];
-}
+};
 
-// This is how we store a user's choice for a question
-export interface UserAnswer {
-  questionId: string;
-  optionId: string;
-}
+export type Question = {
+  id: QuestionId;
+  category: CategoryId;
+  title: LocalizedText;
+  description: LocalizedText;
+  options: AnswerOption[];
+};
 
-// Aggregated score for a single category
-export interface CategoryScore {
+export type AnswerOption = {
+  id: AnswerOptionId;
+  label: LocalizedText;
+  description?: LocalizedText;
+  // numerikus érték a DP-engine számára (pl. 0–10 skála)
+  value: number;
+};
+
+// Egy konkrét válasz: melyik kérdésre melyik opció
+export type Answer = {
+  questionId: QuestionId;
+  optionId: AnswerOptionId;
+};
+
+// DP-output: DecisionProfile
+
+export type ColorCode = 'red' | 'yellow' | 'green';
+
+export type CategoryScore = {
   category: CategoryId;
   score: number;
-  color: RiskColor;
-}
+  color: ColorCode;
+};
 
-// Result profile that the engine returns
-export interface DecisionProfile {
-  totalScores: CategoryScore[];
-}
-// Comparison between self profile and proxy profile for one category
-export interface ProxyFitCategoryComparison {
+export type DecisionProfile = {
+  storyId: StoryId;
+  domain: Domain;
+  categoryScores: CategoryScore[];
+};
+
+// ProxyFit – Self vs Proxy eltérés + fitIndex
+
+export type FitLevel = 'low' | 'medium' | 'high';
+
+export type ProxyFitCategoryDiff = {
   category: CategoryId;
   selfScore: number;
   proxyScore: number;
-  /**
-   * proxyScore - selfScore (pozitív = proxy többet "tol" az adott irányba)
-   */
-  difference: number;
-}
+  absDifference: number;
+};
 
-// Aggregated ProxyFit result for all categories
-export interface ProxyFitResult {
-  categories: ProxyFitCategoryComparison[];
-  /**
-   * Átlagos abszolút eltérés a kategóriák között
-   * (0 = teljes egyezés, minél nagyobb, annál nagyobb a mismatch)
-   */
-  overallDifference: number;
-}
+export type ProxyFitResult = {
+  fitIndex: number; // 0–100
+  fitLevel: FitLevel;
+  categories: ProxyFitCategoryDiff[];
+};
+
+// Session állapotgép – in-memory store + későbbi persistens DB-hez
+
+export type SessionStatus =
+  | 'created'
+  | 'selfCompleted'
+  | 'proxyCompleted'
+  | 'closed';
+
+export type SessionId = string;
+
+export type Session = {
+  id: SessionId;
+  domain: Domain;
+  storyId: StoryId;
+  selfAnswers: Answer[];
+  proxyAnswers?: Answer[];
+  selfLabel?: string | null;
+  proxyLabel?: string | null;
+  status: SessionStatus;
+  createdAt: string; // ISO string
+  updatedAt: string; // ISO string
+};

@@ -3,6 +3,7 @@ import { Story } from '@/types/dp';
 
 export const demoStory: Story = {
   id: 'end_of_life_demo',
+  domain: 'health',
   title: {
     de: 'Demo: Entscheidungssituation am Lebensende',
     en: 'Demo: End-of-life decision scenario',
