@@ -268,9 +268,12 @@ export default function HealthProxyPage() {
             </span>
           </div>
 
-          <h2 className="text-lg font-medium text-slate-50">
-            {currentQuestion.text[LANG]}
-          </h2>
+          <h2 className="text-sm font-semibold text-slate-100">
+              {t(currentQuestion.title)}
+            </h2>
+            <p className="text-xs text-slate-300">
+              {t(currentQuestion.description)}
+            </p>
 
           <div className="space-y-2">
             {currentQuestion.options.map((option) => (
