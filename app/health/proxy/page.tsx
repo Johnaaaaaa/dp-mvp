@@ -18,7 +18,8 @@ export default function HealthProxyPage() {
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    function copyToClipboard(value: string | null) {
+
+  function copyToClipboard(value: string | null) {
     if (!value) return;
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
       console.warn('Clipboard API not available');
@@ -52,10 +53,22 @@ export default function HealthProxyPage() {
   }
 
   const totalQuestions = demoStory.questions.length;
-  const currentQuestion = demoStory.questions[currentIndex];
+  // Itt leszarjuk a szigorú típust → támogatjuk a régi (text) és új (title/description) formát is.
+  const questions = demoStory.questions as unknown as any[];
+  const currentQuestion = questions[currentIndex] ?? {};
+
+  const currentQuestionText: string =
+    (currentQuestion.title && currentQuestion.title[LANG]) ??
+    (currentQuestion.text && currentQuestion.text[LANG]) ??
+    '';
+
+  const currentQuestionDescription: string | null =
+    currentQuestion.description && currentQuestion.description[LANG]
+      ? currentQuestion.description[LANG]
+      : null;
 
   function handleAnswer(optionId: string) {
-    const questionId = currentQuestion.id;
+    const questionId = currentQuestion.id as string;
     const answer: Answer = { questionId, optionId };
     const updated = [...answers, answer];
     setAnswers(updated);
@@ -112,6 +125,7 @@ export default function HealthProxyPage() {
     setErrorMessage(null);
   }
 
+  // SUBMIT phase
   if (phase === 'submit') {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -129,7 +143,7 @@ export default function HealthProxyPage() {
             </p>
           </header>
 
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3 text-sm text-slate-300">
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3 text-sm text-slate-300">
             <p>
               Session-ID:{' '}
               <span className="font-mono text-slate-100 text-xs">
@@ -199,6 +213,7 @@ export default function HealthProxyPage() {
     );
   }
 
+  // DONE phase
   if (phase === 'done') {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -242,7 +257,7 @@ export default function HealthProxyPage() {
     );
   }
 
-  // questions phase
+  // QUESTIONS phase
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-3xl space-y-8">
@@ -269,14 +284,17 @@ export default function HealthProxyPage() {
           </div>
 
           <h2 className="text-sm font-semibold text-slate-100">
-              {t(currentQuestion.title)}
-            </h2>
+            {currentQuestionText}
+          </h2>
+
+          {currentQuestionDescription && (
             <p className="text-xs text-slate-300">
-              {t(currentQuestion.description)}
+              {currentQuestionDescription}
             </p>
+          )}
 
           <div className="space-y-2">
-            {currentQuestion.options.map((option) => (
+            {(currentQuestion.options ?? []).map((option: any) => (
               <button
                 key={option.id}
                 type="button"
