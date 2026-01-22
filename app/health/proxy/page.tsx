@@ -1,15 +1,35 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { demoStory } from '@/data/stories';
 import type { Answer, Lang } from '@/types/dp';
 
 const LANG: Lang = 'de';
-
 type Phase = 'questions' | 'submit' | 'done';
 
+// ---- KÜLSŐ KOMPONENS: csak Suspense wrapper ----
 export default function HealthProxyPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+          <div className="w-full max-w-md space-y-4">
+            <h1 className="text-2xl font-semibold">Health – Proxy</h1>
+            <p className="text-sm text-slate-300">
+              Proxy-Flow wird geladen...
+            </p>
+          </div>
+        </main>
+      }
+    >
+      <HealthProxyInner />
+    </Suspense>
+  );
+}
+
+// ---- BELSŐ KOMPONENS: itt használjuk a useSearchParams-t ----
+function HealthProxyInner() {
   const searchParams = useSearchParams();
   const sessionId = searchParams.get('sessionId');
 
@@ -37,7 +57,7 @@ export default function HealthProxyPage() {
       ? `${baseUrl}/health/session?sessionId=${sessionId}`
       : null;
 
-  // Ha nincs sessionId a URL-ben → hibaképernyő
+  // Ha nincs sessionId: hiba képernyő
   if (!sessionId) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -53,24 +73,14 @@ export default function HealthProxyPage() {
   }
 
   const totalQuestions = demoStory.questions.length;
-  // Itt leszarjuk a szigorú típust → támogatjuk a régi (text) és új (title/description) formát is.
-  const questions = demoStory.questions as unknown as any[];
-  const currentQuestion = questions[currentIndex] ?? {};
-
-  const currentQuestionText: string =
-    (currentQuestion.title && currentQuestion.title[LANG]) ??
-    (currentQuestion.text && currentQuestion.text[LANG]) ??
-    '';
-
-  const currentQuestionDescription: string | null =
-    currentQuestion.description && currentQuestion.description[LANG]
-      ? currentQuestion.description[LANG]
-      : null;
+  const currentQuestion = demoStory.questions[currentIndex];
 
   function handleAnswer(optionId: string) {
-    const questionId = currentQuestion.id as string;
-    const answer: Answer = { questionId, optionId };
-    const updated = [...answers, answer];
+    const questionId = currentQuestion.id;
+
+    // biztonság kedvéért: ha ugyanarra a kérdésre már van answer, cseréljük
+    const filtered = answers.filter((a) => a.questionId !== questionId);
+    const updated: Answer[] = [...filtered, { questionId, optionId }];
     setAnswers(updated);
 
     const nextIndex = currentIndex + 1;
@@ -125,7 +135,7 @@ export default function HealthProxyPage() {
     setErrorMessage(null);
   }
 
-  // SUBMIT phase
+  // ---- SUBMIT FÁZIS ----
   if (phase === 'submit') {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -213,7 +223,7 @@ export default function HealthProxyPage() {
     );
   }
 
-  // DONE phase
+  // ---- DONE FÁZIS ----
   if (phase === 'done') {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
@@ -257,7 +267,7 @@ export default function HealthProxyPage() {
     );
   }
 
-  // QUESTIONS phase
+  // ---- QUESTIONS FÁZIS ----
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-3xl space-y-8">
@@ -284,17 +294,11 @@ export default function HealthProxyPage() {
           </div>
 
           <h2 className="text-sm font-semibold text-slate-100">
-            {currentQuestionText}
+            {currentQuestion.text[LANG]}
           </h2>
 
-          {currentQuestionDescription && (
-            <p className="text-xs text-slate-300">
-              {currentQuestionDescription}
-            </p>
-          )}
-
           <div className="space-y-2">
-            {(currentQuestion.options ?? []).map((option: any) => (
+            {currentQuestion.options.map((option) => (
               <button
                 key={option.id}
                 type="button"

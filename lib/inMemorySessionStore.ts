@@ -1,66 +1,87 @@
 // lib/inMemorySessionStore.ts
 
 import { randomUUID } from 'crypto';
-import type { Answer, Session } from '@/types/dp';
+import type { Answer, Domain, Session } from '@/types/dp';
 
-// Egyszerű in-memory tároló: újraindításkor kiürül.
-// MVP / dev célra jó, később DB-re cseréljük.
+// Egyszerű in-memory tároló – dev / demo-ra elég.
+// Prod-ban majd DB lesz, de a Session shape ugyanaz marad.
 const sessions = new Map<string, Session>();
 
-type CreateHealthSelfSessionInput = {
+function generateId() {
+  return randomUUID();
+}
+
+type CreateSelfSessionInput = {
+  domain: Domain;
   storyId: string;
   selfAnswers: Answer[];
   selfLabel?: string;
   proxyLabel?: string;
 };
 
-export function createHealthSelfSession(
-  input: CreateHealthSelfSessionInput,
-): Session {
-  const id = randomUUID();
+// Generikus self-session létrehozás bármely domainre (health, match, stb.)
+function createSelfSession({
+  domain,
+  storyId,
+  selfAnswers,
+  selfLabel,
+  proxyLabel,
+}: CreateSelfSessionInput): Session {
+  const id = generateId();
   const now = new Date().toISOString();
 
   const session: Session = {
     id,
-    domain: 'health',
-    storyId: input.storyId,
-    flowId: 'health_self_proxy_v1',
+    domain,
+    storyId,
     status: 'proxy_pending',
-    selfLabel: input.selfLabel,
-    proxyLabel: input.proxyLabel,
-    selfAnswers: input.selfAnswers,
-    proxyAnswers: undefined,
+    selfLabel,
+    proxyLabel,
+    selfAnswers,
     createdAt: now,
-    completedAt: undefined,
+    updatedAt: now, // <- Session típus ezt kötelezően várja
   };
 
   sessions.set(id, session);
   return session;
 }
 
+// Health helper
+export function createHealthSelfSession(
+  args: Omit<CreateSelfSessionInput, 'domain'>,
+): Session {
+  return createSelfSession({ domain: 'health', ...args });
+}
+
+// Match helper
+export function createMatchSelfSession(
+  args: Omit<CreateSelfSessionInput, 'domain'>,
+): Session {
+  return createSelfSession({ domain: 'match', ...args });
+}
+
 export function getSession(id: string): Session | undefined {
   return sessions.get(id);
 }
 
+// Proxy válaszok mentése (health + match közösen)
 export function updateSessionProxyAnswers(
-  id: string,
+  sessionId: string,
   proxyAnswers: Answer[],
-): Session | undefined {
-  const existing = sessions.get(id);
-  if (!existing) return undefined;
+  proxyLabel?: string,
+): Session | null {
+  const existing = sessions.get(sessionId);
+  if (!existing) return null;
 
   const updated: Session = {
     ...existing,
     proxyAnswers,
+    proxyLabel: proxyLabel ?? existing.proxyLabel,
     status: 'completed',
-    completedAt: new Date().toISOString(),
+    // completedAt nincs a Session típusban → nem használjuk, elég updatedAt
+    updatedAt: new Date().toISOString(),
   };
 
-  sessions.set(id, updated);
+  sessions.set(sessionId, updated);
   return updated;
-}
-
-// Későbbi debug / admin célokra jól jöhet
-export function listSessions(): Session[] {
-  return Array.from(sessions.values());
 }

@@ -13,6 +13,7 @@ import type {
   FitLevel,
 } from '@/types/dp';
 
+
 // Szín meghatározása egy kategória-score-hoz.
 // Feltételezett skála: 0–10 körüli értékek.
 function getColorForScore(score: number): ColorCode {
@@ -72,6 +73,7 @@ export function calculateDecisionProfile(
   story: Story,
   answers: Answer[],
 ): DecisionProfile {
+
   const categoryValues: Map<string, number[]> = new Map();
 
   for (const question of story.questions as any[]) {

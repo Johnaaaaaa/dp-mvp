@@ -44,14 +44,26 @@ export type Question = {
   title: LocalizedText;
   description: LocalizedText;
   options: AnswerOption[];
+[key: string]: unknown;
 };
 
 export type AnswerOption = {
-  id: AnswerOptionId;
+  id: string;
   label: LocalizedText;
-  description?: LocalizedText;
-  // numerikus érték a DP-engine számára (pl. 0–10 skála)
-  value: number;
+
+  // Numerikus mezők, amiket a dpEngine figyel:
+  // getOptionNumericValue() először ezeket próbálja.
+  value?: number;
+  score?: number;
+  weight?: number;
+
+  // Domain-spec többdimenziós pontszámok (health, match stb.).
+  // A jelenlegi engine NEM használja, de a story-kban lehet.
+  scores?: Partial<Record<CategoryId, number>>;
+
+  // Engedjük meg, hogy legyenek extra mezők is (helper text, flags, bármi),
+  // így nem fog sírni a TS, ha máshol bővíted.
+  [key: string]: unknown;
 };
 
 // Egy konkrét válasz: melyik kérdésre melyik opció
@@ -96,9 +108,9 @@ export type ProxyFitResult = {
 // Session állapotgép – in-memory store + későbbi persistens DB-hez
 
 export type SessionStatus =
-  | 'created'
-  | 'selfCompleted'
-  | 'proxyCompleted'
+  | 'open'
+  | 'proxy_pending'
+  | 'completed'
   | 'closed';
 
 export type SessionId = string;

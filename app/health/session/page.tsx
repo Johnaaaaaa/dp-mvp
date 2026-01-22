@@ -1,229 +1,243 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
-
-import type { Answer, Lang } from '@/types/dp';
+import { useEffect, useMemo, useState } from 'react';
 import { demoStory } from '@/data/stories';
 import { categoryDefinitionsById } from '@/data/categories';
 import {
   calculateDecisionProfile,
   calculateProxyFit,
 } from '@/lib/dpEngine';
+import type {
+  Session,
+  DecisionProfile,
+  ProxyFitResult,
+} from '@/types/dp';
 
-const LANG: Lang = 'de';
+const LANG = 'de' as const;
 
-type LoadedSession = {
-  id: string;
-  storyId: string;
-  selfAnswers?: Answer[];
-  proxyAnswers?: Answer[];
-  selfLabel?: string;
-  proxyLabel?: string;
-  createdAt?: string;
-};
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return '–';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString('de-CH', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
-function t(localized: any): string {
-  if (localized == null) return '';
-  if (typeof localized === 'string') return localized;
-
-  if (typeof localized === 'object') {
-    const byLang = (localized as Record<string, unknown>)[LANG];
-    if (typeof byLang === 'string') return byLang;
-
-    const deVal = (localized as Record<string, unknown>)['de'];
-    if (typeof deVal === 'string') return deVal;
-
-    const enVal = (localized as Record<string, unknown>)['en'];
-    if (typeof enVal === 'string') return enVal;
+function getStatusLabel(status: Session['status']): string {
+  switch (status) {
+    case 'proxy_pending':
+      return 'Self ausgefüllt, Proxy ausstehend';
+    case 'completed':
+      return 'Self & Proxy abgeschlossen';
+    case 'open':
+      return 'In Bearbeitung';
+    case 'closed':
+      return 'Abgeschlossen (archiviert)';
+    default:
+      return status;
   }
-  return '';
+}
+
+function getFitLevelLabel(fitIndex: number): string {
+  if (fitIndex < 50) return 'Low Fit';
+  if (fitIndex < 80) return 'Medium Fit';
+  return 'High Fit';
 }
 
 export default function HealthSessionPage() {
-  const searchParams = useSearchParams();
-  const sessionId = searchParams.get('sessionId'); // string | null
-
-  const [loading, setLoading] = useState<boolean>(true);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [session, setSession] = useState<LoadedSession | null>(null);
 
+  // URL-ből szedjük ki a sessionId-t, NEM useSearchParams-szel
   useEffect(() => {
-  // Lokális másolat, amin TS tud szűkíteni
-  const id = sessionId ?? '';
+    if (typeof window === 'undefined') return;
 
-  if (!sessionId) {
-    setErrorMessage('Keine Session-ID angegeben.');
-    setLoading(false);
-    return;
-  }
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('sessionId');
 
-  let cancelled = false;
+    if (!id) {
+      setErrorMessage('Fehler: Session-ID fehlt in der URL.');
+      setLoading(false);
+      return;
+    }
 
-  async function loadSession() {
-    setLoading(true);
-    setErrorMessage(null);
+    setSessionId(id);
 
-    try {
-      const response = await fetch(
-        `/api/health/session?id=${encodeURIComponent(id)}`,
-      );
-
-      if (!response.ok) {
-        let msg = 'Session konnte nicht geladen werden.';
-        try {
-          const data = await response.json();
-          if (typeof data.error === 'string') {
-            msg = data.error;
-          }
-        } catch {
-          // ignore
-        }
-        if (!cancelled) {
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/health/session?id=${encodeURIComponent(id)}`);
+        if (!res.ok) {
+          const data = await res.json().catch(() => null);
+          const msg =
+            (data && (data.error as string | undefined)) ||
+            'Fehler beim Laden der Session.';
           setErrorMessage(msg);
-          setSession(null);
           setLoading(false);
+          return;
         }
-        return;
-      }
 
-      const data = (await response.json()) as LoadedSession;
-      if (!cancelled) {
+        const data = (await res.json()) as Session;
         setSession(data);
         setLoading(false);
-      }
-    } catch (error) {
-      console.error('Error loading health session', error);
-      if (!cancelled) {
+      } catch (err) {
+        console.error('Error loading health session', err);
         setErrorMessage('Interner Fehler beim Laden der Session.');
-        setSession(null);
         setLoading(false);
       }
+    };
+
+    load();
+  }, []);
+
+    // demoStory-t "kilazítjuk" az engine számára, hogy ne zavarjon a readonly
+  const storyForEngine = demoStory as any;
+
+  const selfProfile: DecisionProfile | null = useMemo(() => {
+    if (!session || !session.selfAnswers || !session.selfAnswers.length) {
+      return null;
     }
-  }
+    return calculateDecisionProfile(storyForEngine, session.selfAnswers);
+  }, [session]);
 
-  loadSession();
+  const proxyProfile: DecisionProfile | null = useMemo(() => {
+    if (!session || !session.proxyAnswers || !session.proxyAnswers.length) {
+      return null;
+    }
+    return calculateDecisionProfile(storyForEngine, session.proxyAnswers);
+  }, [session]);
 
-  return () => {
-    cancelled = true;
-  };
-}, [sessionId]);
 
+  const proxyFit: ProxyFitResult | null = useMemo(() => {
+    if (!selfProfile || !proxyProfile) return null;
+    return calculateProxyFit(selfProfile, proxyProfile);
+  }, [selfProfile, proxyProfile]);
 
-  // Story – most egyetlen demo story, de később storyId alapján választhatjuk
-  const story = demoStory as any;
-
-  // Self / Proxy válaszok a session-ből
-  const selfAnswers: Answer[] = (session?.selfAnswers || []) as Answer[];
-  const proxyAnswers: Answer[] = (session?.proxyAnswers || []) as Answer[];
-
-  const selfProfile =
-    selfAnswers.length > 0
-      ? calculateDecisionProfile(story, selfAnswers)
-      : null;
-
-  const proxyProfile =
-    proxyAnswers.length > 0
-      ? calculateDecisionProfile(story, proxyAnswers)
-      : null;
-
-  const proxyFit =
-    selfProfile && proxyProfile
-      ? calculateProxyFit(selfProfile, proxyProfile)
-      : null;
-
-  const selfLabel = session?.selfLabel || 'Patient:in';
-  const proxyLabel = session?.proxyLabel || 'nicht benannt';
-
-  if (!sessionId) {
+  // 0) sessionId még nem resolve-olódott → initial loading
+  if (loading && !errorMessage && !sessionId) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-lg space-y-4 text-center">
-          <h1 className="text-2xl font-semibold">
-            Keine Session-ID angegeben.
-          </h1>
+        <div className="w-full max-w-md space-y-4">
+          <h1 className="text-2xl font-semibold">Health – Session</h1>
           <p className="text-sm text-slate-300">
-            Bitte rufe diese Seite mit einem gültigen <code>sessionId</code>{' '}
-            Query-Parameter auf.
-          </p>
-          <Link
-            href="/health"
-            className="inline-flex items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
-          >
-            Zurück zur Health-Übersicht
-          </Link>
-        </div>
-      </main>
-    );
-  }
-
-  if (loading) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-lg space-y-3 text-center">
-          <h1 className="text-2xl font-semibold">Session wird geladen...</h1>
-          <p className="text-sm text-slate-300">
-            Bitte warten. Self- und Proxy-Profil werden aufgebaut.
+            Session wird geladen...
           </p>
         </div>
       </main>
     );
   }
 
-  if (errorMessage || !session) {
+  // 1) explicit hiba (hiányzó ID vagy fetch error)
+  if (errorMessage) {
     return (
       <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
-        <div className="max-w-lg space-y-4 text-center">
-          <h1 className="text-2xl font-semibold">Session nicht verfügbar.</h1>
+        <div className="w-full max-w-md space-y-4">
+          <h1 className="text-2xl font-semibold">Health – Session</h1>
           <p className="text-sm text-red-400">{errorMessage}</p>
-          <Link
-            href="/health"
-            className="inline-flex items-center justify-center rounded-md border border-slate-700 bg-slate-900 px-4 py-2 text-sm"
-          >
-            Zurück zur Health-Übersicht
-          </Link>
+          {sessionId && (
+            <p className="text-xs text-slate-500">
+              Session-ID: <span className="font-mono">{sessionId}</span>
+            </p>
+          )}
         </div>
       </main>
     );
   }
+
+  // 2) nincs session-adat
+  if (!session) {
+    return (
+      <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
+        <div className="w-full max-w-md space-y-4">
+          <h1 className="text-2xl font-semibold">Health – Session</h1>
+          <p className="text-sm text-slate-300">
+            Keine Session-Daten gefunden.
+          </p>
+          {sessionId && (
+            <p className="text-xs text-slate-500">
+              Session-ID: <span className="font-mono">{sessionId}</span>
+            </p>
+          )}
+        </div>
+      </main>
+    );
+  }
+
+  const createdAtLabel = formatDateTime(session.createdAt);
+  const updatedAtLabel = formatDateTime(session.updatedAt);
+  const statusLabel = getStatusLabel(session.status);
+  const selfLabel = session.selfLabel || 'Patient:in';
+  const proxyLabel = session.proxyLabel || 'nicht benannt';
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-5xl space-y-8 py-8">
-        <header className="space-y-2">
-          <p className="text-xs uppercase tracking-wide text-slate-500">
-            Health / Doctor View
+        {/* Header */}
+        <header className="space-y-3">
+          <p className="text-xs uppercase tracking-wide text-slate-400">
+            Health – Doctor View
           </p>
           <h1 className="text-2xl md:text-3xl font-semibold">
             Session-Übersicht
           </h1>
-          <p className="text-sm text-slate-300">
-            Übersicht über Self- und Proxy-Profil sowie ProxyFit für eine
-            konkrete Session.
-          </p>
-          <div className="text-xs text-slate-400 space-y-1 mt-2">
-            <p>
-              <span className="font-semibold text-slate-200">Session-ID:</span>{' '}
-              <span className="font-mono">{session.id}</span>
-            </p>
-            <p>
-              <span className="font-semibold text-slate-200">
-                Fall / Patient:in:
-              </span>{' '}
-              {selfLabel}
-            </p>
-            <p>
-              <span className="font-semibold text-slate-200">
-                Stellvertreter:in:
-              </span>{' '}
-              {proxyLabel}
-            </p>
+          <div className="grid gap-3 text-xs text-slate-300 md:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-slate-400">Session-ID</p>
+              <p className="font-mono text-[11px] break-all text-slate-100">
+                {session.id}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Status</p>
+              <p>{statusLabel}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Fall / Person</p>
+              <p>{selfLabel}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Stellvertreter:in</p>
+              <p>{proxyLabel}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Erstellt</p>
+              <p>{createdAtLabel}</p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-slate-400">Zuletzt aktualisiert</p>
+              <p>{updatedAtLabel}</p>
+            </div>
           </div>
         </header>
 
+        {/* Ha még nincs Self / Proxy / ProxyFit → info blokk */}
+        {!selfProfile && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-300">
+            Für diese Session wurden noch keine Self-Antworten erfasst.
+          </div>
+        )}
+
+        {selfProfile && !proxyProfile && (
+          <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-300 space-y-1">
+            <p>
+              Self-Profil ist vorhanden, Proxy-Antworten fehlen noch.
+            </p>
+            <p className="text-slate-400">
+              Sobald Proxy-Antworten eingetragen sind, werden hier der
+              Vergleich und der ProxyFit-Index angezeigt.
+            </p>
+          </div>
+        )}
+
+        {/* Fő 3-oszlopos blokk: Self, Proxy, ProxyFit */}
         <section className="grid md:grid-cols-3 gap-6">
-          {/* Self-Profil */}
+          {/* Self Profil */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
             <h2 className="text-sm font-semibold text-slate-200">
               Self-Profil
@@ -235,9 +249,10 @@ export default function HealthSessionPage() {
             )}
             {selfProfile && (
               <ul className="space-y-2 text-xs">
-                {selfProfile.categoryScores.map((cat, index) => {
-                  const def = categoryDefinitionsById[cat.category];
-                  const label = def?.label[LANG] ?? cat.category;
+                {selfProfile.categoryScores.map((cat) => {
+                  const def = (categoryDefinitionsById as any)[cat.category];
+                  const label =
+                    def?.label?.[LANG] ?? (cat.category as string);
 
                   const colorClass =
                     cat.color === 'red'
@@ -248,14 +263,14 @@ export default function HealthSessionPage() {
 
                   return (
                     <li
-                      key={`${cat.category}-${index}`}
+                      key={cat.category}
                       className="flex items-center justify-between gap-2"
                     >
                       <span className="text-slate-200">{label}</span>
                       <span
                         className={`px-2 py-0.5 rounded-full border ${colorClass}`}
                       >
-                        {cat.score.toFixed(1)}
+                        {cat.score}
                       </span>
                     </li>
                   );
@@ -264,7 +279,7 @@ export default function HealthSessionPage() {
             )}
           </div>
 
-          {/* Proxy-Profil */}
+          {/* Proxy Profil */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
             <h2 className="text-sm font-semibold text-slate-200">
               Proxy-Profil
@@ -276,9 +291,10 @@ export default function HealthSessionPage() {
             )}
             {proxyProfile && (
               <ul className="space-y-2 text-xs">
-                {proxyProfile.categoryScores.map((cat, index) => {
-                  const def = categoryDefinitionsById[cat.category];
-                  const label = def?.label[LANG] ?? cat.category;
+                {proxyProfile.categoryScores.map((cat) => {
+                  const def = (categoryDefinitionsById as any)[cat.category];
+                  const label =
+                    def?.label?.[LANG] ?? (cat.category as string);
 
                   const colorClass =
                     cat.color === 'red'
@@ -289,14 +305,14 @@ export default function HealthSessionPage() {
 
                   return (
                     <li
-                      key={`${cat.category}-${index}`}
+                      key={cat.category}
                       className="flex items-center justify-between gap-2"
                     >
                       <span className="text-slate-200">{label}</span>
                       <span
                         className={`px-2 py-0.5 rounded-full border ${colorClass}`}
                       >
-                        {cat.score.toFixed(1)}
+                        {cat.score}
                       </span>
                     </li>
                   );
@@ -307,11 +323,13 @@ export default function HealthSessionPage() {
 
           {/* ProxyFit */}
           <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 space-y-3">
-            <h2 className="text-sm font-semibold text-slate-200">ProxyFit</h2>
+            <h2 className="text-sm font-semibold text-slate-200">
+              ProxyFit
+            </h2>
             {!proxyFit && (
               <p className="text-xs text-slate-400">
-                ProxyFit wird berechnet, sobald sowohl Self- als auch
-                Proxy-Profil vorliegen (mit gemeinsamen Kategorien).
+                ProxyFit wird berechnet, sobald Self- und Proxy-Profil
+                vorhanden sind.
               </p>
             )}
             {proxyFit && (
@@ -321,21 +339,22 @@ export default function HealthSessionPage() {
                   <span className="font-mono text-slate-100">
                     {proxyFit.fitIndex.toFixed(0)}
                   </span>{' '}
-                  ({proxyFit.fitLevel})
+                  ({getFitLevelLabel(proxyFit.fitIndex)})
                 </p>
                 <ul className="space-y-1">
-                  {proxyFit.categories.map((diff, index) => {
-                    const def = categoryDefinitionsById[diff.category];
-                    const label = def?.label[LANG] ?? diff.category;
+                  {proxyFit.categories.map((diff) => {
+                    const def = (categoryDefinitionsById as any)[diff.category];
+                    const label =
+                      def?.label?.[LANG] ?? (diff.category as string);
+
                     return (
                       <li
-                        key={`${diff.category}-${index}`}
-                        className="flex items-center justify-between gap-2"
+                        key={diff.category}
+                        className="flex items-center justify-between gap-2 text-xs"
                       >
                         <span className="text-slate-200">{label}</span>
                         <span className="text-slate-300">
-                          Self {diff.selfScore.toFixed(1)} | Proxy{' '}
-                          {diff.proxyScore.toFixed(1)} | Diff{' '}
+                          Self {diff.selfScore} | Proxy {diff.proxyScore} | Diff{' '}
                           {diff.absDifference.toFixed(1)}
                         </span>
                       </li>
@@ -347,11 +366,16 @@ export default function HealthSessionPage() {
           </div>
         </section>
 
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <Link href="/health" className="hover:text-slate-200 underline">
-            Zurück zur Health-Übersicht
-          </Link>
-        </div>
+        <footer className="pt-4 border-t border-slate-800 mt-4 text-[11px] text-slate-500 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <p>
+            Ansicht: <span className="font-medium">Health / Session</span>{' '}
+            – Self vs Proxy vs ProxyFit.
+          </p>
+          <p>
+            Story:{' '}
+            <span className="font-mono">{demoStory.id}</span>
+          </p>
+        </footer>
       </div>
     </main>
   );
